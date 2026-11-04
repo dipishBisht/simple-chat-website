@@ -47,76 +47,119 @@ function getInitialData() {
   };
 }
 
+function send(socket: WebSocket, data: object) {
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(data));
+}
+
+function broadcast(roomId: string, data: object) {
+  clients.forEach((client) => {
+    if (client.room === roomId && client.socket.readyState === WebSocket.OPEN)
+      send(client.socket, data);
+  });
+}
+
 wss.on("connection", (ws) => {
   const id = generateRandomId();
 
-  const initialData = getInitialData();
   clients.set(id, { id, socket: ws });
-  ws.send(JSON.stringify({ type: "connected", id: id, initialData }));
+
+  send(ws, { type: "connected", id, initialData: getInitialData() });
+
   console.log("New client connected", id);
 
   ws.on("message", function (data) {
-    console.log(`Message from ${id} -> %s`, data);
-    const d = JSON.parse(data.toString());
+    let d: any;
 
-    if (d.type === "join") {
-      const roomUsers = [
-        ...clients.values().filter((user) => user.room === room),
-      ];
-
-      if (roomUsers.length >= MAX_ROOM_SIZE)
-        return ws.send(
-          JSON.stringify({
-            type: "error",
-            message: "Room is full",
-          }),
-        );
-      const room = d.room;
-      const name = d.name;
-
-      const currentUser = clients.get(id);
-
-      if (!currentUser) return;
-      currentUser.room = room;
-      currentUser.name = name;
-      clients.set(id, currentUser);
-
-      [...clients.values()].forEach((client) => {
-        if (client.id !== id) {
-          client.socket.send(
-            JSON.stringify({
-              type: "update",
-              message: `${name} joined the room`,
-            }),
-          );
-        } else {
-          client.socket.send(JSON.stringify({ status: "success", room }));
-        }
+    try {
+      d = JSON.parse(data.toString());
+    } catch (error) {
+      return send(ws, {
+        type: "error",
+        message: "Invalid JSON",
       });
     }
 
-    if (d.type === "message") {
-      const roomId = clients.get(id)?.room;
+    const currentUser = clients.get(id);
+    if (!currentUser) return;
 
-      if (!roomId) {
-        return ws.send(
-          JSON.stringify({
-            type: "error",
-            message: "Join a room first",
-          }),
-        );
+    if (d.type === "join") {
+      const room = d.room;
+      const name = d.name;
+
+      if (typeof name !== "string" || !name.trim()) {
+        return send(ws, {
+          type: "error",
+          message: "Invalid username",
+        });
       }
 
-      [...clients.values()].forEach((client) => {
-        if (client.room === roomId)
-          if (client.socket.readyState === WebSocket.OPEN)
-            client.socket.send(
-              JSON.stringify({
-                type: "message",
-                id: id,
-                message: data.toString(),
-              }),
-            );
+      if (typeof name !== "string" || !name.trim() || name.trim().length > 20) {
+        return send(ws, {
+          type: "error",
+          message: "Invalid username",
+        });
+      }
+
+      const roomUsers = [...clients.values()].filter(
+        (user) => user.room === room,
+      );
+
+      if (currentUser.room !== room && roomUsers.length >= MAX_ROOM_SIZE) {
+        return send(ws, {
+          type: "error",
+          message: "Room is full",
+        });
+      }
+
+      currentUser.room = room;
+      currentUser.name = name.trim();
+      clients.set(id, currentUser);
+
+      const initialData = getInitialData();
+
+      send(ws, {
+        type: "joined",
+        room,
+        initialData,
+      });
+
+      clients.forEach((client) => {
+        send(client.socket, {
+          type: "room-update",
+          initialData,
+        });
+      });
+    } else if (d.type === "message") {
+      const roomId = currentUser.room;
+
+      if (!roomId) {
+        return send(ws, {
+          type: "error",
+          message: "Join a room first",
+        });
+      }
+
+      if (
+        typeof d.message !== "string" ||
+        !d.message.trim() ||
+        d.message.length > 2000
+      ) {
+        return send(ws, {
+          type: "error",
+          message: "Invalid message",
+        });
+      }
+
+      broadcast(roomId, {
+        type: "message",
+        id,
+        name: currentUser.name,
+        message: d.message.trim(),
+      });
+    } else {
+      send(ws, {
+        type: "error",
+        message: "Unknown event type",
       });
     }
   });
@@ -124,5 +167,13 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     clients.delete(id);
     console.log("Client Disconnected", id);
+
+    const initialData = getInitialData();
+    clients.forEach((client) => {
+      send(client.socket, {
+        type: "room-update",
+        initialData,
+      });
+    });
   });
 });
