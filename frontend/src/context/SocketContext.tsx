@@ -1,5 +1,6 @@
 import {
   createContext,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -130,6 +131,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// export function useSocket(){
-//   const 
-// }
+export function useSocket() {
+  const context = useContext(SocketContext);
+
+  if (!context)
+    throw new Error("useSocket must be used within a socket provider");
+
+  return context;
+}

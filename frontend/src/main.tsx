@@ -5,6 +5,7 @@ import App from "./App.tsx";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import HomePage from "./pages/home.tsx";
 import RoomPage from "./pages/room.tsx";
+import { SocketProvider } from "./context/SocketContext.tsx";
 
 const router = createBrowserRouter([
   {
@@ -24,6 +25,8 @@ const router = createBrowserRouter([
 ]);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <SocketProvider>
+      <RouterProvider router={router} />
+    </SocketProvider>
   </StrictMode>,
 );
